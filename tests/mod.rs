@@ -1,12 +1,12 @@
 extern crate ash;
-extern crate vma;
+extern crate vk_mem;
 
-use ash::{extensions::ext::DebugUtils, vk};
+use ash::{ext::debug_utils, vk};
 use std::{os::raw::c_void, sync::Arc};
-use vma::Alloc;
+use vk_mem::Alloc;
 
 fn extension_names() -> Vec<*const i8> {
-    vec![DebugUtils::name().as_ptr()]
+    vec![debug_utils::NAME.as_ptr()]
 }
 
 unsafe extern "system" fn vulkan_debug_callback(
@@ -29,7 +29,7 @@ pub struct TestHarness {
     pub device: ash::Device,
     pub physical_device: ash::vk::PhysicalDevice,
     pub debug_callback: ash::vk::DebugUtilsMessengerEXT,
-    pub debug_report_loader: ash::extensions::ext::DebugUtils,
+    pub debug_report_loader: debug_utils::Instance,
 }
 
 impl Drop for TestHarness {
@@ -46,7 +46,7 @@ impl Drop for TestHarness {
 impl TestHarness {
     pub fn new() -> Self {
         let app_name = ::std::ffi::CString::new("vk-mem testing").unwrap();
-        let app_info = ash::vk::ApplicationInfo::builder()
+        let app_info = ash::vk::ApplicationInfo::default()
             .application_name(&app_name)
             .application_version(0)
             .engine_name(&app_name)
@@ -60,7 +60,7 @@ impl TestHarness {
             .collect();
 
         let extension_names_raw = extension_names();
-        let create_info = ash::vk::InstanceCreateInfo::builder()
+        let create_info = ash::vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_layer_names(&layers_names_raw)
             .enabled_extension_names(&extension_names_raw);
@@ -72,7 +72,7 @@ impl TestHarness {
                 .expect("Instance creation error")
         };
 
-        let debug_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::builder()
+        let debug_info = ash::vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
                 ash::vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
                     | ash::vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
@@ -84,7 +84,7 @@ impl TestHarness {
             )
             .pfn_user_callback(Some(vulkan_debug_callback));
 
-        let debug_report_loader = DebugUtils::new(&entry, &instance);
+        let debug_report_loader = debug_utils::Instance::new(&entry, &instance);
         let debug_callback = unsafe {
             debug_report_loader
                 .create_debug_utils_messenger(&debug_info, None)
@@ -113,13 +113,12 @@ impl TestHarness {
 
         let priorities = [1.0];
 
-        let queue_info = [ash::vk::DeviceQueueCreateInfo::builder()
+        let queue_info = [ash::vk::DeviceQueueCreateInfo::default()
             .queue_family_index(0)
-            .queue_priorities(&priorities)
-            .build()];
+            .queue_priorities(&priorities)];
 
         let device_create_info =
-            ash::vk::DeviceCreateInfo::builder().queue_create_infos(&queue_info);
+            ash::vk::DeviceCreateInfo::default().queue_create_infos(&queue_info);
 
         let device: ash::Device = unsafe {
             instance
@@ -137,10 +136,10 @@ impl TestHarness {
         }
     }
 
-    pub fn create_allocator(&self) -> vma::Allocator {
+    pub fn create_allocator(&self) -> vk_mem::Allocator {
         let create_info =
-            vma::AllocatorCreateInfo::new(&self.instance, &self.device, self.physical_device);
-        vma::Allocator::new(create_info).unwrap()
+            vk_mem::AllocatorCreateInfo::new(&self.instance, &self.device, self.physical_device);
+        vk_mem::Allocator::new(create_info).unwrap()
     }
 }
 
@@ -159,21 +158,18 @@ fn create_allocator() {
 fn create_gpu_buffer() {
     let harness = TestHarness::new();
     let allocator = harness.create_allocator();
-    let allocation_info = vma::AllocationCreateInfo {
-        usage: vma::MemoryUsage::Auto,
+    let allocation_info = vk_mem::AllocationCreateInfo {
+        usage: vk_mem::MemoryUsage::Auto,
         ..Default::default()
     };
 
     unsafe {
         let (buffer, mut allocation) = allocator
             .create_buffer(
-                &ash::vk::BufferCreateInfo::builder()
-                    .size(16 * 1024)
-                    .usage(
-                        ash::vk::BufferUsageFlags::VERTEX_BUFFER
-                            | ash::vk::BufferUsageFlags::TRANSFER_DST,
-                    )
-                    .build(),
+                &ash::vk::BufferCreateInfo::default().size(16 * 1024).usage(
+                    ash::vk::BufferUsageFlags::VERTEX_BUFFER
+                        | ash::vk::BufferUsageFlags::TRANSFER_DST,
+                ),
                 &allocation_info,
             )
             .unwrap();
@@ -187,23 +183,20 @@ fn create_gpu_buffer() {
 fn create_cpu_buffer_preferred() {
     let harness = TestHarness::new();
     let allocator = harness.create_allocator();
-    let allocation_info = vma::AllocationCreateInfo {
+    let allocation_info = vk_mem::AllocationCreateInfo {
         required_flags: ash::vk::MemoryPropertyFlags::HOST_VISIBLE,
         preferred_flags: ash::vk::MemoryPropertyFlags::HOST_COHERENT
             | ash::vk::MemoryPropertyFlags::HOST_CACHED,
-        flags: vma::AllocationCreateFlags::MAPPED,
+        flags: vk_mem::AllocationCreateFlags::MAPPED,
         ..Default::default()
     };
     unsafe {
         let (buffer, mut allocation) = allocator
             .create_buffer(
-                &ash::vk::BufferCreateInfo::builder()
-                    .size(16 * 1024)
-                    .usage(
-                        ash::vk::BufferUsageFlags::VERTEX_BUFFER
-                            | ash::vk::BufferUsageFlags::TRANSFER_DST,
-                    )
-                    .build(),
+                &ash::vk::BufferCreateInfo::default().size(16 * 1024).usage(
+                    ash::vk::BufferUsageFlags::VERTEX_BUFFER
+                        | ash::vk::BufferUsageFlags::TRANSFER_DST,
+                ),
                 &allocation_info,
             )
             .unwrap();
@@ -219,16 +212,15 @@ fn create_gpu_buffer_pool() {
     let allocator = harness.create_allocator();
     let allocator = Arc::new(allocator);
 
-    let buffer_info = ash::vk::BufferCreateInfo::builder()
+    let buffer_info = ash::vk::BufferCreateInfo::default()
         .size(16 * 1024)
-        .usage(ash::vk::BufferUsageFlags::UNIFORM_BUFFER | ash::vk::BufferUsageFlags::TRANSFER_DST)
-        .build();
+        .usage(ash::vk::BufferUsageFlags::UNIFORM_BUFFER | ash::vk::BufferUsageFlags::TRANSFER_DST);
 
-    let allocation_info = vma::AllocationCreateInfo {
+    let allocation_info = vk_mem::AllocationCreateInfo {
         required_flags: ash::vk::MemoryPropertyFlags::HOST_VISIBLE,
         preferred_flags: ash::vk::MemoryPropertyFlags::HOST_COHERENT
             | ash::vk::MemoryPropertyFlags::HOST_CACHED,
-        flags: vma::AllocationCreateFlags::MAPPED,
+        flags: vk_mem::AllocationCreateFlags::MAPPED,
 
         ..Default::default()
     };
@@ -238,10 +230,12 @@ fn create_gpu_buffer_pool() {
             .unwrap();
 
         // Create a pool that can have at most 2 blocks, 128 MiB each.
-        let pool_info = vma::PoolCreateInfo::new()
-            .memory_type_index(memory_type_index)
-            .block_size(128 * 1024 * 1024)
-            .max_block_count(2);
+        let pool_info = vk_mem::PoolCreateInfo {
+            memory_type_index,
+            block_size: 128 * 1024 * 1024,
+            max_block_count: 2,
+            ..Default::default()
+        };
 
         let pool = allocator.create_pool(&pool_info).unwrap();
 
@@ -256,8 +250,8 @@ fn create_gpu_buffer_pool() {
 fn test_gpu_stats() {
     let harness = TestHarness::new();
     let allocator = harness.create_allocator();
-    let allocation_info = vma::AllocationCreateInfo {
-        usage: vma::MemoryUsage::Auto,
+    let allocation_info = vk_mem::AllocationCreateInfo {
+        usage: vk_mem::MemoryUsage::Auto,
         ..Default::default()
     };
 
@@ -269,13 +263,10 @@ fn test_gpu_stats() {
 
         let (buffer, mut allocation) = allocator
             .create_buffer(
-                &ash::vk::BufferCreateInfo::builder()
-                    .size(16 * 1024)
-                    .usage(
-                        ash::vk::BufferUsageFlags::VERTEX_BUFFER
-                            | ash::vk::BufferUsageFlags::TRANSFER_DST,
-                    )
-                    .build(),
+                &ash::vk::BufferCreateInfo::default().size(16 * 1024).usage(
+                    ash::vk::BufferUsageFlags::VERTEX_BUFFER
+                        | ash::vk::BufferUsageFlags::TRANSFER_DST,
+                ),
                 &allocation_info,
             )
             .unwrap();
@@ -296,23 +287,30 @@ fn test_gpu_stats() {
 
 #[test]
 fn create_virtual_block() {
-    let create_info = vma::VirtualBlockCreateInfo::new()
-        .size(16 * 1024 * 1024)
-        .flags(vma::VirtualBlockCreateFlags::VMA_VIRTUAL_BLOCK_CREATE_LINEAR_ALGORITHM_BIT); // 16MB block
-    let _virtual_block = vma::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
+    let create_info = vk_mem::VirtualBlockCreateInfo {
+        size: 16 * 1024 * 1024,
+        flags: vk_mem::VirtualBlockCreateFlags::VMA_VIRTUAL_BLOCK_CREATE_LINEAR_ALGORITHM_BIT,
+        allocation_callbacks: None,
+    }; // 16MB block
+    let _virtual_block =
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 }
 
 #[test]
 fn virtual_allocate_and_free() {
-    let create_info = vma::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
+    let create_info = vk_mem::VirtualBlockCreateInfo {
+        size: 16 * 1024 * 1024,
+        flags: vk_mem::VirtualBlockCreateFlags::VMA_VIRTUAL_BLOCK_CREATE_LINEAR_ALGORITHM_BIT,
+        allocation_callbacks: None,
+    }; // 16MB block
     let mut virtual_block =
-        vma::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 
-    let allocation_info = vma::VirtualAllocationCreateInfo {
+    let allocation_info = vk_mem::VirtualAllocationCreateInfo {
         size: 8 * 1024 * 1024,
         alignment: 0,
         user_data: 0,
-        flags: vma::VirtualAllocationCreateFlags::empty(),
+        flags: vk_mem::VirtualAllocationCreateFlags::empty(),
     };
 
     // Fully allocate the VirtualBlock and then free both allocations
@@ -338,16 +336,19 @@ fn virtual_allocate_and_free() {
 
 #[test]
 fn virtual_allocation_user_data() {
-    let create_info = vma::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
+    let create_info = vk_mem::VirtualBlockCreateInfo {
+        size: 16 * 1024 * 1024,
+        ..Default::default()
+    }; // 16MB block
     let mut virtual_block =
-        vma::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 
     let user_data = Box::new(vec![12, 34, 56, 78, 90]);
-    let allocation_info = vma::VirtualAllocationCreateInfo {
+    let allocation_info = vk_mem::VirtualAllocationCreateInfo {
         size: 8 * 1024 * 1024,
         alignment: 0,
         user_data: user_data.as_ptr() as usize,
-        flags: vma::VirtualAllocationCreateFlags::empty(),
+        flags: vk_mem::VirtualAllocationCreateFlags::empty(),
     };
 
     unsafe {
@@ -363,15 +364,18 @@ fn virtual_allocation_user_data() {
 
 #[test]
 fn virtual_block_out_of_space() {
-    let create_info = vma::VirtualBlockCreateInfo::new().size(16 * 1024 * 1024); // 16MB block
+    let create_info = vk_mem::VirtualBlockCreateInfo {
+        size: 16 * 1024 * 1024,
+        ..Default::default()
+    }; // 16MB block
     let mut virtual_block =
-        vma::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
+        vk_mem::VirtualBlock::new(create_info).expect("Couldn't create VirtualBlock");
 
-    let allocation_info = vma::VirtualAllocationCreateInfo {
+    let allocation_info = vk_mem::VirtualAllocationCreateInfo {
         size: 16 * 1024 * 1024 + 1,
         alignment: 0,
         user_data: 0,
-        flags: vma::VirtualAllocationCreateFlags::empty(),
+        flags: vk_mem::VirtualAllocationCreateFlags::empty(),
     };
 
     unsafe {

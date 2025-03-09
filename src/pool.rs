@@ -6,15 +6,15 @@ use crate::Allocation;
 use crate::AllocationCreateInfo;
 use crate::Allocator;
 use crate::PoolCreateInfo;
-use ash::prelude::VkResult;
 use ash::vk;
+use ash::VkResult;
 #[derive(Clone, Copy)]
-pub struct PoolHandle(ffi::VmaPool);
+pub struct PoolHandle(pub ffi::VmaPool);
 
 /// Represents custom memory pool handle.
 pub struct AllocatorPool {
-    allocator: Arc<Allocator>,
-    pub(crate) pool: PoolHandle,
+    pub allocator: Arc<Allocator>,
+    pub pool: PoolHandle,
 }
 unsafe impl Send for AllocatorPool {}
 unsafe impl Sync for AllocatorPool {}
@@ -24,7 +24,17 @@ impl Allocator {
     pub fn create_pool(self: &Arc<Self>, create_info: &PoolCreateInfo) -> VkResult<AllocatorPool> {
         unsafe {
             let mut ffi_pool: ffi::VmaPool = std::mem::zeroed();
-            ffi::vmaCreatePool(self.internal, &create_info.inner, &mut ffi_pool).result()?;
+            let raw_info = ffi::VmaPoolCreateInfo {
+                memoryTypeIndex: create_info.memory_type_index,
+                flags: create_info.flags.bits(),
+                blockSize: create_info.block_size,
+                minBlockCount: create_info.min_block_count,
+                maxBlockCount: create_info.max_block_count,
+                priority: create_info.priority,
+                minAllocationAlignment: create_info.min_allocation_alignment,
+                pMemoryAllocateNext: create_info.memory_allocate_next as *mut std::ffi::c_void,
+            };
+            ffi::vmaCreatePool(self.internal, &raw_info, &mut ffi_pool).result()?;
             Ok(AllocatorPool {
                 pool: PoolHandle(ffi_pool),
                 allocator: self.clone(),
